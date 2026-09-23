@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASAFI // Mission Control & Telemetry Station</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-spacecraft">
+  <!-- Scanline / CRT Vignette Overlay for Tactical Feel -->
+  <div class="hud-scanline"></div>
+  <div class="hud-vignette"></div>
+
+  <!-- MAIN CONTAINER -->
+  <div class="app-layout">
+
+    <!-- ========================================================== -->
+    <!-- 1. TOP HEADER / FLIGHT STATUS BANNER                      -->
+    <!-- ========================================================== -->
+    <header class="hud-header">
+      <div class="header-left">
+        <div class="insignia-box">
+          <div class="insignia-ring"></div>
+          <div class="insignia-core"></div>
+        </div>
+        <div class="mission-titles">
+          <div class="project-tag">PROJECT ASAFI // PAYLOAD AVIONICS</div>
+          <h1 class="mission-name">LIVE MISSION CONTROL & TELEMETRY</h1>
+          <div class="eval-team">Engineering Clinics (ECS) &bull; Pair 2: Kavyansh & Deepanshu</div>
+        </div>
+      </div>
+
+      <!-- Center Status Badges -->
+      <div class="header-center">
+        <div class="status-pill-group">
+          <div class="status-pill state-pill" id="systemStateBadge">
+            <span class="pill-dot"></span>
+            <span class="pill-label">STATE:</span>
+            <span class="pill-value" id="systemStateText">STANDBY</span>
+          </div>
+          <div class="status-pill mode-pill" id="systemModeBadge">
+            <span class="pill-label">MODE:</span>
+            <span class="pill-value" id="systemModeText">AUTONOMOUS</span>
+          </div>
+          <div class="status-pill met-pill">
+            <span class="pill-label">MET:</span>
+            <span class="pill-value clock-font" id="metTimer">T+00:00:00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Connection & Quick Controls -->
+      <div class="header-right">
+        <div class="comm-link-box">
+          <div class="comm-indicator" id="commDot"></div>
+          <div class="comm-details">
+            <div class="comm-title">PAYLOAD LINK: <span id="commStatusText" class="disconnected">OFFLINE</span></div>
+            <div class="comm-meta">RTT: <span id="rttText">-- ms</span> &bull; PKT: <span id="pktRateText">0 Hz</span></div>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button id="btnToggleSim" class="btn-tactical btn-sim" title="Run in-browser mock simulator">
+            <span class="icon">⚙</span> SIMULATOR: <span id="simStateLabel">OFF</span>
+          </button>
+          <button id="btnAudioToggle" class="btn-tactical btn-audio" title="Toggle audio annunciator">
+            <span class="icon" id="audioIcon">🔊</span> AUDIO: <span id="audioStateLabel">ON</span>
+          </button>
+          <button id="btnConfigModal" class="btn-tactical btn-network" title="Configure connection endpoint">
+            <span class="icon">⚡</span> LINK CFG
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- CRITICAL ALARM BANNER (Visible only during fire lock or overheat) -->
+    <div id="alarmBanner" class="alarm-banner hidden">
+      <div class="alarm-icon">⚠</div>
+      <div class="alarm-text">
+        <span class="alarm-title">THERMAL ANOMALY / FIRE DETECTED:</span>
+        <span class="alarm-desc">MLX90614 Object Temp exceeds 55.0°C. Target lock acquired on PCA9685 gimbal!</span>
+      </div>
+      <button id="btnAlarmQuickSuppress" class="btn-alarm-action">EXECUTE QUICK INTERCEPT</button>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- 2. MAIN 3-COLUMN MISSION CONTROL GRID                      -->
+    <!-- ========================================================== -->
+    <main class="mission-grid">
+
+      <!-- ======================================================== -->
+      <!-- LEFT COLUMN: OPTICAL SENSOR & TARGET TRACKING HUD        -->
+      <!-- ======================================================== -->
+      <section class="hud-panel video-panel">
+        <div class="panel-header">
+          <div class="header-title">
+            <span class="panel-icon">⌖</span> OPTICAL & THERMAL TRACKING SENSOR
+          </div>
+          <div class="header-metrics">
+            <span class="tag tag-cyan">CAM-01</span>
+            <span class="tag tag-green" id="fpsTag">24.0 FPS</span>
+            <span class="tag tag-amber" id="yoloTag">YOLOv8: READY</span>
+          </div>
+        </div>
+
+        <div class="video-viewport-wrapper">
+          <!-- Canvas Overlay for live HUD graphics & targeting crosshairs -->
+          <canvas id="hudCanvas" width="640" height="480"></canvas>
+          <!-- Underneath Image element that receives WebSocket Base64 or MJPEG frames -->
+          <img id="videoStreamImg" alt="Optical Feed" class="video-feed-img" />
+
+          <!-- HUD Visual Overlays (HTML layer on top) -->
+          <div class="hud-corners">
+            <div class="corner top-left"></div>
+            <div class="corner top-right"></div>
+            <div class="corner bottom-left"></div>
+            <div class="corner bottom-right"></div>
+          </div>
+
+          <!-- Targeting Info Overlay Box -->
+          <div class="target-telemetry-overlay" id="targetOverlay">
+            <div class="overlay-row">
+              <span class="lbl">TARGET LOCK:</span>
+              <span class="val text-danger" id="targetLockStatus">NO TARGET</span>
+            </div>
+            <div class="overlay-row">
+              <span class="lbl">CONFIDENCE:</span>
+              <span class="val" id="targetConfidence">0.0%</span>
+            </div>
+            <div class="overlay-row">
+              <span class="lbl">CENTROID:</span>
+              <span class="val" id="targetCoords">[X: ---, Y: ---]</span>
+            </div>
+            <div class="overlay-row">
+              <span class="lbl">OFFSET ERROR:</span>
+              <span class="val" id="targetError">[ΔX: 0.0, ΔY: 0.0]</span>
+            </div>
+          </div>
+
+          <!-- Video Mode Selector Floating Badge -->
+          <div class="video-source-selector">
+            <span class="source-label">STREAM:</span>
+            <button class="source-btn active" data-source="ws">WS STREAM</button>
+            <button class="source-btn" data-source="mjpeg">MJPEG</button>
+            <button class="source-btn" data-source="synth">HUD SYNTH</button>
+          </div>
+        </div>
+
+        <!-- Video Sensor Footer Metrics -->
+        <div class="panel-subfooter">
+          <div class="metric-mini">
+            <div class="m-label">DETECTOR MODEL</div>
+            <div class="m-val text-cyan">YOLOv8-Nano-Fire</div>
+          </div>
+          <div class="metric-mini">
+            <div class="m-label">RESOLUTION</div>
+            <div class="m-val">640x480 (V4L2)</div>
+          </div>
+          <div class="metric-mini">
+            <div class="m-label">INFERENCE TIME</div>
+            <div class="m-val text-green" id="inferenceTimeVal">18.4 ms</div>
+          </div>
+          <div class="metric-mini">
+            <div class="m-label">AUTO-TRACK GAIN</div>
+            <div class="m-val text-amber">Kp=0.08 / Kd=0.02</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- CENTER COLUMN: TELEMETRY SENSORS & ACTUATORS             -->
+      <!-- ======================================================== -->
+      <section class="center-column">
+
+        <!-- 1. MLX90614 Non-Contact IR Pyrometer Card -->
+        <div class="hud-panel telemetry-card pyrometer-card">
+          <div class="panel-header">
+            <div class="header-title">
+              <span class="panel-icon">🔥</span> MLX90614 INFRARED PYROMETER
+            </div>
+            <span class="tag tag-cyan">I2C (0x5A)</span>
+          </div>
+
+          <div class="temp-readouts-container">
+            <!-- Object Temp Readout (Primary) -->
+            <div class="temp-box object-temp-box" id="objectTempContainer">
+              <div class="temp-type-badge">OBJECT / TARGET TEMP</div>
+              <div class="temp-big-val" id="objectTempVal">24.5<span class="temp-unit">°C</span></div>
+              <div class="temp-bar-wrapper">
+                <div class="temp-bar-fill" id="objectTempBar" style="width: 25%;"></div>
+                <div class="temp-bar-threshold" style="left: 55%;" title="Alarm Threshold: 55°C"></div>
+              </div>
+              <div class="temp-meta">
+                <span>NOMINAL: &lt; 45°C</span>
+                <span class="text-danger">FIRE THRESHOLD: 55.0°C</span>
+              </div>
+            </div>
+
+            <!-- Ambient Temp Readout -->
+            <div class="temp-box ambient-temp-box">
+              <div class="temp-type-badge">AMBIENT ENCLOSURE TEMP</div>
+              <div class="temp-mid-val" id="ambientTempVal">23.8<span class="temp-unit">°C</span></div>
+              <div class="delta-t-display">
+                <span class="lbl">ΔT (OBJ - AMB):</span>
+                <span class="val text-cyan" id="deltaTempVal">+0.7°C</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real-Time Thermal Strip Chart (Canvas) -->
+          <div class="thermal-chart-container">
+            <div class="chart-header">
+              <span class="chart-title">REAL-TIME HEAT FLUX PROFILE (LAST 30s)</span>
+              <div class="chart-legend">
+                <span class="legend-item"><span class="dot dot-red"></span> Object Temp</span>
+                <span class="legend-item"><span class="dot dot-cyan"></span> Ambient Temp</span>
+                <span class="legend-item"><span class="dot dot-dashed"></span> 55°C Threshold</span>
+              </div>
+            </div>
+            <canvas id="thermalChartCanvas" height="110"></canvas>
+          </div>
+        </div>
+
+        <!-- 2. Lower Split: Gimbal Attitude & Solenoid Suppression Subsystems -->
+        <div class="center-bottom-split">
+
+          <!-- PCA9685 Gimbal Attitude Radar -->
+          <div class="hud-panel telemetry-card gimbal-card">
+            <div class="panel-header">
+              <div class="header-title">
+                <span class="panel-icon">🎯</span> PCA9685 GIMBAL ATTITUDE
+              </div>
+              <span class="tag tag-cyan">12-BIT PWM</span>
+            </div>
+
+            <div class="gimbal-display-body">
+              <div class="radar-container">
+                <canvas id="gimbalRadarCanvas" width="160" height="160"></canvas>
+                <div class="radar-sweep-line"></div>
+              </div>
+
+              <div class="gimbal-angle-metrics">
+                <div class="angle-metric-box">
+                  <div class="axis-lbl">PAN AXIS (AZIMUTH)</div>
+                  <div class="axis-val text-cyan" id="gimbalPanVal">+00.0°</div>
+                  <div class="axis-sub">TARGET: <span id="targetPanVal">00.0°</span></div>
+                </div>
+                <div class="angle-metric-box">
+                  <div class="axis-lbl">TILT AXIS (ELEVATION)</div>
+                  <div class="axis-val text-cyan" id="gimbalTiltVal">+00.0°</div>
+                  <div class="axis-sub">TARGET: <span id="targetTiltVal">00.0°</span></div>
+                </div>
+                <div class="angle-status-box">
+                  <span class="lbl">SERVO SYNC:</span>
+                  <span class="val text-green" id="gimbalSyncStatus">LOCKED</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cold-Gas Solenoid Interceptor Subsystem -->
+          <div class="hud-panel telemetry-card suppression-card">
+            <div class="panel-header">
+              <div class="header-title">
+                <span class="panel-icon">💧</span> COLD-GAS SUPPRESSION
+              </div>
+              <span class="tag tag-amber" id="valveStatusTag">STANDBY</span>
+            </div>
+
+            <div class="suppression-body">
+              <div class="solenoid-indicator-wrapper">
+                <div class="valve-graphic" id="valveGraphic">
+                  <div class="pipe-h"></div>
+                  <div class="valve-core">
+                    <div class="valve-gate" id="valveGate"></div>
+                  </div>
+                  <div class="spray-stream" id="sprayStream"></div>
+                </div>
+                <div class="valve-state-text" id="solenoidStateText">SOLENOID CLOSED</div>
+              </div>
+
+              <div class="suppression-metrics">
+                <div class="supp-metric-row">
+                  <span class="lbl">CANISTER PRESSURE:</span>
+                  <span class="val text-green" id="canisterPressureVal">6.8 Bar</span>
+                </div>
+                <div class="supp-metric-row">
+                  <span class="lbl">RELAY DRIVE (GPIO 17):</span>
+                  <span class="val" id="relayStateVal">DE-ENERGIZED</span>
+                </div>
+                <div class="supp-metric-row">
+                  <span class="lbl">BURST DURATION:</span>
+                  <span class="val text-cyan">1500 ms</span>
+                </div>
+                <div class="supp-metric-row">
+                  <span class="lbl">TOTAL DISCHARGES:</span>
+                  <span class="val" id="dischargeCountVal">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- RIGHT COLUMN: TELECOMMAND & MANUAL OVERRIDE CONSOLE      -->
+      <!-- ======================================================== -->
+      <section class="hud-panel control-panel">
+        <div class="panel-header">
+          <div class="header-title">
+            <span class="panel-icon">🕹</span> COMMAND & MANUAL OVERRIDE
+          </div>
+          <span class="tag tag-amber">UPLINK CONTROL</span>
+        </div>
+
+        <div class="control-scroll-container">
+
+          <!-- 1. Flight Mode Switcher -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">AUTONOMOUS vs MANUAL INTERCEPT</div>
+            <div class="mode-toggle-bar">
+              <button id="btnModeAuto" class="btn-mode active">
+                <span class="radio-pip"></span> AUTONOMOUS (AI LOCK)
+              </button>
+              <button id="btnModeManual" class="btn-mode">
+                <span class="radio-pip"></span> MANUAL OVERRIDE
+              </button>
+            </div>
+            <div class="mode-help-text" id="modeHelpText">
+              System autonomously tracks fire centroids using YOLOv8 & triggers suppression when MLX90614 confirms > 55°C.
+            </div>
+          </div>
+
+          <!-- 2. Manual Gimbal Slewing Controls (Enabled in Manual Mode) -->
+          <div class="ctrl-group" id="gimbalCtrlGroup">
+            <div class="ctrl-group-title">
+              <span>MANUAL GIMBAL SLEWING</span>
+              <span class="step-select">STEP: 5°</span>
+            </div>
+
+            <!-- Virtual Tactical D-Pad -->
+            <div class="dpad-wrapper">
+              <div class="dpad-grid">
+                <div></div>
+                <button class="dpad-btn" id="dpadUp" title="Tilt Up [W]">▲</button>
+                <div></div>
+                <button class="dpad-btn" id="dpadLeft" title="Pan Left [A]">◀</button>
+                <button class="dpad-btn dpad-center" id="dpadCenter" title="Center Gimbal">⌂</button>
+                <button class="dpad-btn" id="dpadRight" title="Pan Right [D]">▶</button>
+                <div></div>
+                <button class="dpad-btn" id="dpadDown" title="Tilt Down [S]">▼</button>
+                <div></div>
+              </div>
+            </div>
+
+            <!-- Precision Sliders -->
+            <div class="slider-control">
+              <div class="slider-labels">
+                <span>PAN ANGLE</span>
+                <span class="slider-val" id="panSliderVal">0.0°</span>
+              </div>
+              <input type="range" id="panSlider" min="-90" max="90" step="1" value="0" class="tactical-slider" />
+            </div>
+            <div class="slider-control">
+              <div class="slider-labels">
+                <span>TILT ANGLE</span>
+                <span class="slider-val" id="tiltSliderVal">0.0°</span>
+              </div>
+              <input type="range" id="tiltSlider" min="-45" max="45" step="1" value="0" class="tactical-slider" />
+            </div>
+          </div>
+
+          <!-- 3. Cold-Gas Interceptor Trigger Section (Safety Interlock) -->
+          <div class="ctrl-group fire-control-group">
+            <div class="ctrl-group-title text-danger">COLD-GAS DISCHARGE WEAPONS INTERLOCK</div>
+
+            <!-- Safety Guard Switch -->
+            <div class="safety-switch-wrapper">
+              <div class="switch-label-col">
+                <div class="switch-title">PAYLOAD ARMING SAFETY</div>
+                <div class="switch-subtitle" id="safetyStatusDesc">SOLENOID DISARMED &bull; SAFE</div>
+              </div>
+              <label class="rocker-switch">
+                <input type="checkbox" id="safetySwitch" />
+                <span class="rocker-slider"></span>
+              </label>
+            </div>
+
+            <!-- Burst Duration Select -->
+            <div class="burst-selector-wrapper">
+              <span class="burst-lbl">BURST TIME:</span>
+              <button class="btn-burst" data-ms="500">0.5s</button>
+              <button class="btn-burst" data-ms="1000">1.0s</button>
+              <button class="btn-burst active" data-ms="1500">1.5s</button>
+              <button class="btn-burst" data-ms="2500">2.5s</button>
+            </div>
+
+            <!-- ILLUMINATED DISCHARGE BUTTON -->
+            <button id="btnFireSolenoid" class="btn-tactical-fire disabled" disabled>
+              <span class="fire-flame-icon">🔥</span>
+              <span class="fire-text-col">
+                <span class="main-fire-text">EXECUTE INTERCEPT</span>
+                <span class="sub-fire-text">DISCHARGE COLD-GAS SOLENOID</span>
+              </span>
+            </button>
+          </div>
+
+          <!-- 4. Emergency Stop / Safe-All -->
+          <div class="ctrl-group">
+            <button id="btnEmergencyStop" class="btn-estop">
+              <span class="estop-icon">🛑</span> EMERGENCY ALL-STOP (E-STOP)
+            </button>
+          </div>
+
+          <!-- 5. Evaluation Demo Injection Tools (For ECS Evaluation Panel) -->
+          <div class="ctrl-group eval-demo-group">
+            <div class="ctrl-group-title text-cyan">ECS EVALUATION DEMO TOOLS</div>
+            <div class="demo-buttons-grid">
+              <button id="btnSimFire" class="btn-demo btn-demo-fire" title="Injects a simulated flame target">
+                🔥 TRIGGER TEST FIRE
+              </button>
+              <button id="btnResetPayload" class="btn-demo btn-demo-reset" title="Restores all systems to nominal standby">
+                ↺ RESET TO NOMINAL
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Raspberry Pi Avionics Diagnostics Footnote -->
+        <div class="panel-subfooter diagnostics-footer">
+          <div class="diag-item">
+            <span class="lbl">PI CPU TEMP:</span>
+            <span class="val" id="piCpuTempVal">48.2°C</span>
+          </div>
+          <div class="diag-item">
+            <span class="lbl">PI LOAD:</span>
+            <span class="val" id="piCpuLoadVal">34%</span>
+          </div>
+          <div class="diag-item">
+            <span class="lbl">RAM USED:</span>
+            <span class="val" id="piRamVal">39%</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ========================================================== -->
+    <!-- 3. BOTTOM BLACKBOX MISSION EVENT LOG TERMINAL              -->
+    <!-- ========================================================== -->
+    <footer class="hud-terminal">
+      <div class="terminal-bar">
+        <div class="terminal-title">
+          <span class="terminal-dot"></span> ASAFI FLIGHT BLACKBOX & TELEMETRY EVENT CONSOLE
+        </div>
+        <div class="terminal-filters">
+          <button class="term-btn active" data-filter="all">ALL</button>
+          <button class="term-btn" data-filter="fire">FIRE ALERTS</button>
+          <button class="term-btn" data-filter="cmd">TELECOMMANDS</button>
+          <button class="term-btn" data-filter="system">AVIONICS</button>
+        </div>
+        <div class="terminal-actions">
+          <button id="btnClearLogs" class="btn-term-action">CLEAR</button>
+          <button id="btnExportLogs" class="btn-term-action">EXPORT LOGS</button>
+        </div>
+      </div>
+      <div class="terminal-logs" id="terminalLogs">
+        <!-- Live log entries will be prepended/appended here -->
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- 4. NETWORK & WEBSOCKET CONFIGURATION MODAL                 -->
+  <!-- ========================================================== -->
+  <div id="configModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">⚡ PAYLOAD NETWORK CONFIGURATION</div>
+        <button id="btnCloseModal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="wsUrlInput">Raspberry Pi WebSocket URL:</label>
+          <input type="text" id="wsUrlInput" class="tactical-input" value="ws://localhost:8765" placeholder="ws://192.168.1.50:8765" />
+          <div class="field-hint">Use <code>ws://localhost:8765</code> for local testing or <code>ws://&lt;PI_IP&gt;:8765</code> on LAN with Pair 1's hardware.</div>
+        </div>
+        <div class="field-group">
+          <label for="mjpegUrlInput">Raspberry Pi Video Feed URL (Optional MJPEG):</label>
+          <input type="text" id="mjpegUrlInput" class="tactical-input" value="http://localhost:8080/video_feed" placeholder="http://192.168.1.50:8080/video_feed" />
+        </div>
+        <div class="field-group">
+          <label>Auto-Reconnect Interval:</label>
+          <select id="reconnectSelect" class="tactical-select">
+            <option value="2000">2 Seconds (High Priority)</option>
+            <option value="5000" selected>5 Seconds (Standard)</option>
+            <option value="10000">10 Seconds</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnDisconnectLink" class="btn-tactical btn-danger">DISCONNECT</button>
+        <button id="btnSaveConnectLink" class="btn-tactical btn-primary">CONNECT TO LINK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
